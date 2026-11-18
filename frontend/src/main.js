@@ -105,19 +105,52 @@ async function showProfile() {
       return
     }
     if (!response.ok) throw new Error('정보를 불러오지 못했습니다.')
-    const user = await response.json()
+    let user = await response.json()
     content.innerHTML = `
       <div class="form-heading"><span class="step">MY ACCOUNT</span><h2>내 정보</h2><p>가입하신 계정 정보를 확인하세요.</p></div>
-      <dl class="profile-details">
-        <div><dt>이름</dt><dd id="profile-name"></dd></div>
-        <div><dt>이메일</dt><dd id="profile-email"></dd></div>
-      </dl>
-      <p id="profile-message" class="message" role="status" aria-live="polite"></p>
+      <form id="profile-form">
+        <label for="profile-name">이름</label>
+        <input id="profile-name" name="name" required maxlength="50" autocomplete="name">
+        <dl class="profile-details"><div><dt>이메일</dt><dd id="profile-email"></dd></div></dl>
+        <p id="profile-message" class="message" role="status" aria-live="polite"></p>
+        <button type="submit" id="save-profile">이름 저장</button>
+      </form>
       <button type="button" id="back-to-account" class="full-button">돌아가기</button>
       <button type="button" id="delete-account" class="delete-button">회원탈퇴</button>`
-    document.querySelector('#profile-name').textContent = user.name
+    document.querySelector('#profile-name').value = user.name
     document.querySelector('#profile-email').textContent = user.email || '이메일 정보 없음'
     document.querySelector('#back-to-account').addEventListener('click', () => showAccount(user))
+    document.querySelector('#profile-form').addEventListener('submit', async (event) => {
+      event.preventDefault()
+      const message = document.querySelector('#profile-message')
+      const name = document.querySelector('#profile-name').value.trim()
+      message.className = 'message'
+      if (!name) {
+        message.textContent = '이름을 입력해 주세요.'
+        return
+      }
+      const buttons = content.querySelectorAll('button')
+      buttons.forEach(button => { button.disabled = true })
+      message.textContent = ''
+      try {
+        const result = await fetch('/api/me', {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+        })
+        if (result.status === 401) {
+          showForm('login', '로그인이 만료되었습니다. 다시 로그인해 주세요.')
+          return
+        }
+        if (!result.ok) throw new Error('저장 실패')
+        user = await result.json()
+        document.querySelector('#profile-name').value = user.name
+        message.classList.add('success')
+        message.textContent = '이름을 저장했습니다.'
+      } catch {
+        message.textContent = '이름을 저장하지 못했습니다. 다시 시도해 주세요.'
+      } finally {
+        buttons.forEach(button => { button.disabled = false })
+      }
+    })
     document.querySelector('#delete-account').addEventListener('click', async (event) => {
       if (!window.confirm('회원탈퇴를 진행하시겠습니까? 계정 정보가 삭제되며 되돌릴 수 없습니다.')) return
       const deleteButton = event.currentTarget

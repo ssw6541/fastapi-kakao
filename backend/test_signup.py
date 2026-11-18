@@ -117,6 +117,25 @@ def test_login_session_and_logout(tmp_path, monkeypatch):
         assert client.get("/api/me").status_code == 401
 
 
+def test_update_own_profile(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.db")
+    with TestClient(main.app) as client, TestClient(main.app) as other:
+        assert client.patch("/api/me", json={"name": "New Name"}).status_code == 401
+        first = {"name": "First", "email": "first@example.com", "password": "password123"}
+        second = {"name": "Second", "email": "second@example.com", "password": "password123"}
+        assert client.post("/api/signup", json=first).status_code == 201
+        assert other.post("/api/signup", json=second).status_code == 201
+        assert client.post("/api/login", json={"email": first["email"], "password": first["password"]}).status_code == 200
+        assert other.post("/api/login", json={"email": second["email"], "password": second["password"]}).status_code == 200
+        assert client.patch("/api/me", json={"name": "   "}).status_code == 422
+        assert client.patch("/api/me", json={"name": "a" * 51}).status_code == 422
+        response = client.patch("/api/me", json={"name": "  Updated  "})
+        assert response.status_code == 200
+        assert response.json()["name"] == "Updated"
+        assert client.get("/api/me").json()["name"] == "Updated"
+        assert other.get("/api/me").json()["name"] == "Second"
+
+
 def test_delete_account_revokes_all_sessions(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.db")
     with TestClient(main.app) as client, TestClient(main.app) as other:

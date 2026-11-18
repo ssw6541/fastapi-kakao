@@ -83,15 +83,18 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-class SignupRequest(BaseModel):
+class NameRequest(BaseModel):
     name: str = Field(min_length=1, max_length=50)
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
 
     @field_validator("name", mode="before")
     @classmethod
     def clean_name(cls, value):
         return value.strip() if isinstance(value, str) else value
+
+
+class SignupRequest(NameRequest):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
 
 
 class LoginRequest(BaseModel):
@@ -265,6 +268,16 @@ def logout(response: Response, session: str | None = Cookie(default=None)):
         with connect() as db:
             execute(db, "DELETE FROM sessions WHERE token_hash = ?", (hashlib.sha256(session.encode()).hexdigest(),))
     response.delete_cookie("session")
+
+
+@app.patch("/api/me")
+def update_profile(update: NameRequest, session: str | None = Cookie(default=None)):
+    token_hash = hashlib.sha256((session or "").encode()).hexdigest()
+    with connect() as db:
+        user = execute(db, "UPDATE users SET name = ? WHERE id = (SELECT user_id FROM sessions WHERE token_hash = ? AND expires_at > datetime('now')) RETURNING id, name, email", (update.name, token_hash)).fetchone()
+    if not user:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+    return display_user({"id": user[0], "name": user[1], "email": user[2]})
 
 
 @app.delete("/api/me", status_code=204)
