@@ -1,0 +1,18 @@
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Local database and Python build artifacts
+*.db
+*.db-*
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Dependency and build outputs
+node_modules/
+dist/
+
+# Preserved empty Git metadata from the original backend setup
+backend/.git-initial-backup/
