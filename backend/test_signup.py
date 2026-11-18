@@ -1,10 +1,12 @@
 import base64
 import hashlib
+import io
 import sqlite3
 from urllib.parse import parse_qs, urlsplit
 
 from fastapi.testclient import TestClient
 import pytest
+from PIL import Image
 
 import main
 
@@ -160,6 +162,44 @@ def test_community_posts_replies_likes_and_permissions(tmp_path, monkeypatch):
         assert alice.delete(f"/api/posts/{post_id}").status_code == 204
         assert alice.get("/api/posts").json() == []
         assert bob.get(f"/api/posts/{post_id}/replies").status_code == 404
+
+
+def test_post_image_attachment(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.db")
+    image = io.BytesIO()
+    Image.new("RGB", (2, 2), "red").save(image, format="PNG")
+    payload = image.getvalue()
+    with TestClient(main.app) as client, TestClient(main.app) as anonymous:
+        assert anonymous.post('/api/posts/with-image', files={'image': ('a.png', payload, 'image/png')}).status_code == 401
+        assert client.post('/api/signup', json={'name':'Alice','email':'image@example.com','password':'password123'}).status_code == 201
+        assert client.post('/api/login', json={'email':'image@example.com','password':'password123'}).status_code == 200
+        assert client.post('/api/posts/with-image', files={'image': ('a.png', b'not an image', 'image/png')}).status_code == 422
+        assert client.post('/api/posts/with-image', files={'image': ('big.png', b'x' * (2 * 1024 * 1024 + 1), 'image/png')}).status_code == 413
+        response = client.post('/api/posts/with-image', data={'content':'hello'}, files={'image': ('a.png', payload, 'image/png')})
+        assert response.status_code == 201
+        post_id = response.json()['id']
+        assert client.get('/api/posts').json()[0]['has_image'] is True
+        assert anonymous.get(f'/api/posts/{post_id}/image').status_code == 401
+        image_response = client.get(f'/api/posts/{post_id}/image')
+        assert image_response.status_code == 200
+        assert image_response.headers['content-type'] == 'image/png'
+        assert image_response.content == payload
+        assert client.delete(f'/api/posts/{post_id}').status_code == 204
+        assert client.get(f'/api/posts/{post_id}/image').status_code == 404
+        assert client.post('/api/posts/with-image', files={'image': ('a.png', payload, 'image/png')}).status_code == 201
+
+
+def test_existing_posts_migrate_without_data_loss(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.db")
+    with sqlite3.connect(main.DB_PATH) as db:
+        db.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL)")
+        db.execute("CREATE TABLE posts (id INTEGER PRIMARY KEY, author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, parent_id INTEGER REFERENCES posts(id) ON DELETE CASCADE, content TEXT NOT NULL, created_at TEXT NOT NULL)")
+        db.execute("INSERT INTO users VALUES (1, 'Author', 'a@example.com', 'hash')")
+        db.execute("INSERT INTO posts VALUES (1, 1, NULL, 'Existing post', '2026-01-01')")
+    main.init_database()
+    main.init_database()
+    with sqlite3.connect(main.DB_PATH) as db:
+        assert db.execute("SELECT content, image_data, image_type FROM posts WHERE id=1").fetchone() == ('Existing post', None, None)
 
 
 def test_delete_account_revokes_all_sessions(tmp_path, monkeypatch):

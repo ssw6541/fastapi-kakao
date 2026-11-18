@@ -3,16 +3,18 @@ from pathlib import Path
 import base64
 from datetime import datetime, timezone
 import hashlib
+import io
 import os
 import secrets
 import sqlite3
 from urllib.parse import urlencode
 
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Response, status
+from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 import httpx
 import psycopg
+from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from pwdlib import PasswordHash
 
@@ -80,6 +82,15 @@ def init_database():
             db.execute("CREATE TABLE IF NOT EXISTS posts (id INTEGER PRIMARY KEY, author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, parent_id INTEGER REFERENCES posts(id) ON DELETE CASCADE, content TEXT NOT NULL, created_at TEXT NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS post_likes (post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY (post_id, user_id))")
     with connect() as db:
+        if uses_postgres():
+            db.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS image_data BYTEA")
+            db.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS image_type TEXT")
+        else:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(posts)").fetchall()}
+            if "image_data" not in columns:
+                db.execute("ALTER TABLE posts ADD COLUMN image_data BLOB")
+            if "image_type" not in columns:
+                db.execute("ALTER TABLE posts ADD COLUMN image_type TEXT")
         db.execute("CREATE INDEX IF NOT EXISTS posts_parent_id_idx ON posts (parent_id, id)")
         db.execute("CREATE INDEX IF NOT EXISTS posts_author_id_idx ON posts (author_id)")
         db.execute("CREATE INDEX IF NOT EXISTS post_likes_user_id_idx ON post_likes (user_id)")
@@ -135,8 +146,8 @@ def current_user_id(session: str | None = Cookie(default=None)):
 def post_rows(db, user_id, parent_id):
     condition = "p.parent_id IS NULL" if parent_id is None else "p.parent_id = ?"
     params = (user_id,) if parent_id is None else (user_id, parent_id)
-    rows = execute(db, f"SELECT p.id, p.author_id, u.name, p.content, p.created_at, (SELECT COUNT(*) FROM post_likes l WHERE l.post_id = p.id), (SELECT COUNT(*) FROM posts r WHERE r.parent_id = p.id), EXISTS(SELECT 1 FROM post_likes l WHERE l.post_id = p.id AND l.user_id = ?) FROM posts p JOIN users u ON u.id = p.author_id WHERE {condition} ORDER BY p.id DESC LIMIT 100", params).fetchall()
-    return [{"id": r[0], "author_id": r[1], "author": r[2], "content": r[3], "created_at": r[4], "like_count": r[5], "reply_count": r[6], "liked": bool(r[7])} for r in rows]
+    rows = execute(db, f"SELECT p.id, p.author_id, u.name, p.content, p.created_at, (SELECT COUNT(*) FROM post_likes l WHERE l.post_id = p.id), (SELECT COUNT(*) FROM posts r WHERE r.parent_id = p.id), EXISTS(SELECT 1 FROM post_likes l WHERE l.post_id = p.id AND l.user_id = ?), p.image_data IS NOT NULL FROM posts p JOIN users u ON u.id = p.author_id WHERE {condition} ORDER BY p.id DESC LIMIT 100", params).fetchall()
+    return [{"id": r[0], "author_id": r[1], "author": r[2], "content": r[3], "created_at": r[4], "like_count": r[5], "reply_count": r[6], "liked": bool(r[7]), "has_image": bool(r[8])} for r in rows]
 
 
 @app.get("/api/posts")
@@ -152,6 +163,33 @@ def create_post(post: PostRequest, user_id: int = Depends(current_user_id)):
             raise HTTPException(status_code=404, detail="게시글을 찾을 수 없습니다.")
         row = execute(db, "INSERT INTO posts (author_id, parent_id, content, created_at) VALUES (?, ?, ?, ?) RETURNING id", (user_id, post.parent_id, post.content, datetime.now(timezone.utc).isoformat())).fetchone()
     return {"id": row[0]}
+
+
+@app.post("/api/posts/with-image", status_code=201)
+async def create_post_with_image(image: UploadFile = File(...), content: str = Form(default="", max_length=500), user_id: int = Depends(current_user_id)):
+    data = await image.read(2 * 1024 * 1024 + 1)
+    if len(data) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="이미지는 2MB 이하여야 합니다.")
+    try:
+        with Image.open(io.BytesIO(data)) as picture:
+            mime = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}.get(picture.format)
+            if not mime or picture.width * picture.height > 16_000_000:
+                raise ValueError("Invalid image")
+            picture.verify()
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError):
+        raise HTTPException(status_code=422, detail="JPEG, PNG 또는 WebP 이미지를 선택해 주세요.") from None
+    with connect() as db:
+        row = execute(db, "INSERT INTO posts (author_id, content, created_at, image_data, image_type) VALUES (?, ?, ?, ?, ?) RETURNING id", (user_id, content.strip(), datetime.now(timezone.utc).isoformat(), data, mime)).fetchone()
+    return {"id": row[0]}
+
+
+@app.get("/api/posts/{post_id}/image")
+def get_post_image(post_id: int, user_id: int = Depends(current_user_id)):
+    with connect() as db:
+        row = execute(db, "SELECT image_data, image_type FROM posts WHERE id = ?", (post_id,)).fetchone()
+    if not row or row[0] is None:
+        raise HTTPException(status_code=404, detail="이미지를 찾을 수 없습니다.")
+    return Response(content=bytes(row[0]), media_type=row[1], headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @app.get("/api/posts/{post_id}/replies")

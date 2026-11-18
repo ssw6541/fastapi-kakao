@@ -6,6 +6,7 @@ const icons = {
   heart: '<path d="M20.8 4.6a5.4 5.4 0 0 0-7.6 0L12 5.8l-1.2-1.2a5.4 5.4 0 0 0-7.6 7.6L12 21l8.8-8.8a5.4 5.4 0 0 0 0-7.6Z"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 3v7m4-7v7"/>',
   arrow: '<path d="M5 12h14M14 7l5 5-5 5"/>',
+  image: '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m4 18 5-5 3 3 3-4 5 6"/>',
 }
 
 const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`
@@ -39,7 +40,7 @@ export function showTimeline(root, user, { onProfile, onLogout, onExpired }) {
       <main class="sns-main">
         <header class="sns-header"><div><div class="sns-eyebrow">YOUR COMMUNITY</div><h1>홈 <span>✳</span></h1></div><button id="refresh-feed" class="sns-icon-button" title="새로고침" aria-label="새로고침">↻</button></header>
         <div class="sns-tabs"><span>전체 피드</span><small>모두의 이야기를 만나보세요</small></div>
-        <section class="sns-composer" aria-label="새 글 작성"><div class="sns-avatar self">${initial(user.name)}</div><form id="post-form"><label class="sr-only" for="post-content">새 글 내용</label><textarea id="post-content" placeholder="지금 어떤 생각을 하고 있나요?" maxlength="500" rows="2" required></textarea><div class="sns-compose-footer"><span class="sns-compose-hint">✦ &nbsp;당신의 이야기를 들려주세요</span><div><span id="post-count">0 / 500</span><button type="submit" class="sns-submit">게시하기 ${icon('arrow')}</button></div></div></form></section>
+        <section class="sns-composer" aria-label="새 글 작성"><div class="sns-avatar self">${initial(user.name)}</div><form id="post-form"><label class="sr-only" for="post-content">새 글 내용</label><textarea id="post-content" placeholder="지금 어떤 생각을 하고 있나요?" maxlength="500" rows="2"></textarea><div id="image-preview" class="sns-image-preview" hidden><img alt="선택한 이미지 미리보기"><button type="button" id="remove-image" aria-label="이미지 제거">×</button></div><div class="sns-compose-footer"><div class="sns-attachment"><input type="file" id="image-input" accept="image/jpeg,image/png,image/webp" hidden><button type="button" id="attach-image" class="sns-attach" aria-label="이미지 첨부">${icon('image')}</button><span class="sns-compose-hint">이미지 1장 · 최대 2MB</span></div><div><span id="post-count">0 / 500</span><button type="submit" class="sns-submit">게시하기 ${icon('arrow')}</button></div></div></form></section>
         <div class="sns-section-heading"><span>새로운 이야기</span><span>NEWEST FIRST</span></div>
         <div id="feed-status" class="sns-status" role="status" aria-live="polite"></div><div id="feed-list"></div>
       </main>
@@ -50,6 +51,9 @@ export function showTimeline(root, user, { onProfile, onLogout, onExpired }) {
   const list = root.querySelector('#feed-list')
   const status = root.querySelector('#feed-status')
   const textarea = root.querySelector('#post-content')
+  const imageInput = root.querySelector('#image-input')
+  const imagePreview = root.querySelector('#image-preview')
+  let previewURL = null
   let openPost = null
   let loading = false
 
@@ -67,7 +71,8 @@ export function showTimeline(root, user, { onProfile, onLogout, onExpired }) {
     return `<article class="sns-post ${reply ? 'sns-reply' : ''}" data-post-id="${post.id}">
       <div class="sns-avatar ${post.author_id === user.id ? 'self' : 'other'}">${initial(post.author)}</div>
       <div class="sns-post-body"><div class="sns-post-top"><div><strong>${escapeHTML(post.author)}</strong><span class="sns-post-meta"> · ${timeLabel(post.created_at)}</span></div>${post.author_id === user.id ? `<button class="sns-delete" data-action="delete" data-id="${post.id}" aria-label="게시글 삭제" title="삭제">${icon('trash')}</button>` : ''}</div>
-      <p class="sns-post-content">${escapeHTML(post.content)}</p>
+      ${post.content ? `<p class="sns-post-content">${escapeHTML(post.content)}</p>` : ''}
+      ${post.has_image ? `<img class="sns-post-image" src="/api/posts/${post.id}/image" alt="${escapeHTML(post.author)}님의 첨부 이미지" loading="lazy">` : ''}
       <div class="sns-post-actions">${reply ? '' : `<button data-action="replies" data-id="${post.id}" aria-expanded="${openPost === post.id}">${icon('comment')}<span>${post.reply_count}</span></button>`}<button data-action="like" data-id="${post.id}" class="${post.liked ? 'liked' : ''}" aria-label="${post.liked ? '좋아요 취소' : '좋아요'}" aria-pressed="${post.liked}">${icon('heart')}<span>${post.like_count}</span></button></div>
       ${!reply && openPost === post.id ? `<div class="sns-replies" id="replies-${post.id}"><div class="sns-replies-loading">답글을 불러오는 중...</div></div><form class="sns-reply-form" data-id="${post.id}"><label class="sr-only" for="reply-input-${post.id}">답글 내용</label><input id="reply-input-${post.id}" name="content" placeholder="답글을 남겨보세요" maxlength="500" required><button type="submit">답글</button></form>` : ''}</div></article>`
   }
@@ -104,15 +109,46 @@ export function showTimeline(root, user, { onProfile, onLogout, onExpired }) {
   root.querySelector('#mobile-home').addEventListener('click', () => root.querySelector('#feed-home').click())
   root.querySelector('#refresh-feed').addEventListener('click', loadFeed)
   for (const id of ['focus-compose', 'mobile-write']) root.querySelector(`#${id}`).addEventListener('click', () => { textarea.focus(); textarea.scrollIntoView({ behavior: 'smooth', block: 'center' }) })
+  function clearImage() {
+    if (previewURL) URL.revokeObjectURL(previewURL)
+    previewURL = null
+    imageInput.value = ''
+    imagePreview.hidden = true
+    imagePreview.querySelector('img').removeAttribute('src')
+  }
+  root.querySelector('#attach-image').addEventListener('click', () => imageInput.click())
+  root.querySelector('#remove-image').addEventListener('click', clearImage)
+  imageInput.addEventListener('change', () => {
+    const file = imageInput.files[0]
+    if (!file) { clearImage(); return }
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 2 * 1024 * 1024) {
+      clearImage()
+      status.textContent = 'JPEG, PNG 또는 WebP 이미지를 2MB 이하로 선택해 주세요.'
+      return
+    }
+    if (previewURL) URL.revokeObjectURL(previewURL)
+    previewURL = URL.createObjectURL(file)
+    imagePreview.querySelector('img').src = previewURL
+    imagePreview.hidden = false
+    status.textContent = ''
+  })
   textarea.addEventListener('input', () => { root.querySelector('#post-count').textContent = `${textarea.value.length} / 500` })
   root.querySelector('#post-form').addEventListener('submit', async event => {
     event.preventDefault()
     const content = textarea.value.trim()
-    if (!content) { status.textContent = '내용을 입력해 주세요.'; return }
+    const file = imageInput.files[0]
+    if (!content && !file) { status.textContent = '내용이나 이미지를 입력해 주세요.'; return }
     const button = event.currentTarget.querySelector('button'); button.disabled = true
     try {
-      await request('/api/posts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) })
-      textarea.value = ''; root.querySelector('#post-count').textContent = '0 / 500'; openPost = null; await loadFeed()
+      if (file) {
+        const body = new FormData()
+        body.append('content', content)
+        body.append('image', file)
+        await request('/api/posts/with-image', { method: 'POST', body })
+      } else {
+        await request('/api/posts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) })
+      }
+      textarea.value = ''; clearImage(); root.querySelector('#post-count').textContent = '0 / 500'; openPost = null; await loadFeed()
     } catch (error) { if (status.isConnected) status.textContent = error.message }
     finally { button.disabled = false }
   })

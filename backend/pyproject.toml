@@ -6,9 +6,11 @@ dependencies = [
     "email-validator>=2.4.0",
     "fastapi>=0.163.2",
     "httpx>=0.28.1",
+    "pillow>=13.0.0",
     "psycopg[binary]>=3.3.9",
     "pwdlib[argon2]>=0.4.2",
     "python-dotenv>=1.2.4",
+    "python-multipart>=0.0.34",
     "uvicorn[standard]>=0.54.0",
 ]
 
