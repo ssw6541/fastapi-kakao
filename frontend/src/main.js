@@ -1,4 +1,6 @@
 import './style.css'
+import googleIcon from './assets/google.png'
+import kakaoIcon from './assets/kakao.png'
 
 document.querySelector('#app').innerHTML = `
   <main class="layout">
@@ -39,7 +41,7 @@ function showForm(mode, notice = '') {
       <p id="message" class="message" role="status" aria-live="polite"></p>
       <button type="submit">${isSignup ? '계정 만들기' : '로그인'} <span aria-hidden="true">→</span></button>
     </form>
-    ${isSignup ? '' : '<div class="login-divider"><span>또는</span></div><a class="kakao-button" href="/api/auth/kakao">카카오로 로그인</a><a class="google-button" href="/api/auth/google">Google로 로그인</a>'}
+    ${isSignup ? '' : `<div class="login-divider"><span>또는</span></div><a class="kakao-button" href="/api/auth/kakao"><img src="${kakaoIcon}" alt="">카카오로 로그인</a><a class="google-button" href="/api/auth/google"><img src="${googleIcon}" alt="">Google로 로그인</a>`}
     <p class="footnote">${isSignup ? '이미 계정이 있으신가요?' : '아직 계정이 없으신가요?'} <button class="text-button" id="switch-form" type="button">${isSignup ? '로그인' : '회원가입'}</button></p>`
   const form = document.querySelector('#auth-form')
   const message = document.querySelector('#message')
