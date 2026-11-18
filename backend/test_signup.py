@@ -1,4 +1,7 @@
+import base64
+import hashlib
 import sqlite3
+from urllib.parse import parse_qs, urlsplit
 
 from fastapi.testclient import TestClient
 import pytest
@@ -174,3 +177,58 @@ def test_kakao_login_and_state_validation(tmp_path, monkeypatch):
         assert client.delete("/api/me").status_code == 204
         with sqlite3.connect(main.DB_PATH) as db:
             assert db.execute("SELECT count(*) FROM kakao_accounts").fetchone()[0] == 0
+
+
+def test_google_login_and_state_validation(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.db")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "test-secret")
+
+    class GoogleResponse:
+        def __init__(self, data):
+            self.data = data
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.data
+
+    def post(url, **kwargs):
+        assert url == "https://oauth2.googleapis.com/token"
+        assert kwargs["data"]["code_verifier"]
+        return GoogleResponse({"access_token": "test-token"})
+
+    def get(url, **kwargs):
+        assert url == "https://openidconnect.googleapis.com/v1/userinfo"
+        assert kwargs["headers"]["Authorization"] == "Bearer test-token"
+        return GoogleResponse({"sub": "google-123", "name": "Google User"})
+
+    monkeypatch.setattr(main.httpx, "post", post)
+    monkeypatch.setattr(main.httpx, "get", get)
+    with TestClient(main.app, follow_redirects=False) as client:
+        start = client.get("/api/auth/google")
+        assert start.status_code == 302
+        assert "accounts.google.com/o/oauth2/v2/auth" in start.headers["location"]
+        query = parse_qs(urlsplit(start.headers["location"]).query)
+        verifier = client.cookies.get("google_oauth_verifier")
+        expected = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        assert query["code_challenge"] == [expected]
+        assert query["code_challenge_method"] == ["S256"]
+        state = client.cookies.get("google_oauth_state")
+        assert state
+        assert client.get("/api/auth/google/callback", params={"code": "code", "state": "wrong"}).status_code == 400
+        assert client.get("/api/auth/google/callback", params={"code": "code", "state": state}).status_code == 302
+        profile = client.get("/api/me")
+        assert profile.status_code == 200
+        assert profile.json()["name"] == "Google User"
+        assert profile.json()["email"] is None
+        original_id = profile.json()["id"]
+        assert client.post("/api/logout").status_code == 204
+        assert client.get("/api/auth/google").status_code == 302
+        state = client.cookies.get("google_oauth_state")
+        assert client.get("/api/auth/google/callback", params={"code": "code", "state": state}).status_code == 302
+        assert client.get("/api/me").json()["id"] == original_id
+        assert client.delete("/api/me").status_code == 204
+        with sqlite3.connect(main.DB_PATH) as db:
+            assert db.execute("SELECT count(*) FROM google_accounts").fetchone()[0] == 0

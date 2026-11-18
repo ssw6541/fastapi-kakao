@@ -41,3 +41,12 @@ HTTPS 배포 환경에서는 `COOKIE_SECURE=true`로 설정하세요.
 카카오 계정은 기존 이메일 계정과 자동 연결하지 않습니다. 이메일 제공 동의가 없어도
 동작하며, 내부 식별용 주소는 실제 이메일이 아닙니다. 앱의 회원탈퇴는 로컬 회원과
 세션을 삭제하지만 카카오 측 앱 연결을 해제하지는 않습니다.
+
+## Google 로그인
+
+Google Cloud에서 웹 애플리케이션 OAuth 클라이언트를 만들고 로컬과 배포 환경의
+`/api/auth/google/callback` 주소를 승인된 리디렉션 URI로 등록합니다. 로컬 `.env`와
+Render 환경 변수에 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`을 설정하세요.
+배포 환경의 `GOOGLE_REDIRECT_URI`는 `render.yaml`에 지정되어 있습니다. 기존 Render
+Blueprint에는 새 `sync: false` 변수가 자동으로 추가되지 않으므로 수동으로 입력합니다.
+Google 계정은 다른 로그인 방식의 계정과 자동으로 연결되지 않습니다.

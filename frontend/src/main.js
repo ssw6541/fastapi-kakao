@@ -39,7 +39,7 @@ function showForm(mode, notice = '') {
       <p id="message" class="message" role="status" aria-live="polite"></p>
       <button type="submit">${isSignup ? '계정 만들기' : '로그인'} <span aria-hidden="true">→</span></button>
     </form>
-    ${isSignup ? '' : '<div class="login-divider"><span>또는</span></div><a class="kakao-button" href="/api/auth/kakao">카카오로 로그인</a>'}
+    ${isSignup ? '' : '<div class="login-divider"><span>또는</span></div><a class="kakao-button" href="/api/auth/kakao">카카오로 로그인</a><a class="google-button" href="/api/auth/google">Google로 로그인</a>'}
     <p class="footnote">${isSignup ? '이미 계정이 있으신가요?' : '아직 계정이 없으신가요?'} <button class="text-button" id="switch-form" type="button">${isSignup ? '로그인' : '회원가입'}</button></p>`
   const form = document.querySelector('#auth-form')
   const message = document.querySelector('#message')
@@ -77,7 +77,7 @@ function showForm(mode, notice = '') {
 function showAccount(user) {
   content.innerHTML = `<div class="form-heading"><span class="step">WELCOME BACK</span><h2 id="welcome"></h2><p>로그인되어 있습니다.</p></div><p id="account-email" class="account-email"></p><button type="button" id="profile" class="full-button">내 정보 확인</button><p id="account-message" class="message" role="status" aria-live="polite"></p><button type="button" id="logout" class="full-button">로그아웃</button>`
   document.querySelector('#welcome').textContent = `${user.name}님, 반가워요.`
-  document.querySelector('#account-email').textContent = user.email || '카카오 계정으로 로그인'
+  document.querySelector('#account-email').textContent = user.email || '소셜 계정으로 로그인'
   document.querySelector('#profile').addEventListener('click', showProfile)
   document.querySelector('#logout').addEventListener('click', async (event) => {
     event.currentTarget.disabled = true
