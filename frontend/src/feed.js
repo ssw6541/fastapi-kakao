@@ -7,6 +7,7 @@ const icons = {
   trash: '<path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 3v7m4-7v7"/>',
   arrow: '<path d="M5 12h14M14 7l5 5-5 5"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m4 18 5-5 3 3 3-4 5 6"/>',
+  smile: '<circle cx="12" cy="12" r="9"/><path d="M8 14a4 4 0 0 0 8 0M9 9h.01M15 9h.01"/>',
 }
 
 const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`
@@ -40,7 +41,8 @@ export function showTimeline(root, user, { onProfile, onLogout, onExpired }) {
       <main class="sns-main">
         <header class="sns-header"><div><div class="sns-eyebrow">YOUR COMMUNITY</div><h1>홈 <span>✳</span></h1></div><button id="refresh-feed" class="sns-icon-button" title="새로고침" aria-label="새로고침">↻</button></header>
         <div class="sns-tabs"><span>전체 피드</span><small>모두의 이야기를 만나보세요</small></div>
-        <section class="sns-composer" aria-label="새 글 작성"><div class="sns-avatar self">${initial(user.name)}</div><form id="post-form"><label class="sr-only" for="post-content">새 글 내용</label><textarea id="post-content" placeholder="지금 어떤 생각을 하고 있나요?" maxlength="500" rows="2"></textarea><div id="image-preview" class="sns-image-preview" hidden><img alt="선택한 이미지 미리보기"><button type="button" id="remove-image" aria-label="이미지 제거">×</button></div><div class="sns-compose-footer"><div class="sns-attachment"><input type="file" id="image-input" accept="image/jpeg,image/png,image/webp" hidden><button type="button" id="attach-image" class="sns-attach" aria-label="이미지 첨부 (한국 시간 하루 5장)">${icon('image')}</button><span class="sns-compose-hint">하루 5장 · 장당 2MB</span></div><div><span id="post-count">0 / 500</span><button type="submit" class="sns-submit">게시하기 ${icon('arrow')}</button></div></div></form></section>
+        <section class="sns-composer" aria-label="새 글 작성"><div class="sns-avatar self">${initial(user.name)}</div><form id="post-form"><label class="sr-only" for="post-content">새 글 내용</label><textarea id="post-content" placeholder="무슨 일이 일어나고 있나요?" maxlength="500" rows="1"></textarea><div id="image-preview" class="sns-image-preview" hidden><img alt="선택한 이미지 미리보기"><button type="button" id="remove-image" aria-label="이미지 제거">×</button></div><p id="compose-status" class="sns-compose-status" role="status" aria-live="polite"></p><div class="sns-compose-footer"><div class="sns-attachment"><input type="file" id="image-input" accept="image/jpeg,image/png,image/webp" hidden><button type="button" id="attach-image" class="sns-attach" aria-label="이미지 첨부 (한국 시간 하루 5장)" title="이미지 추가">${icon('image')}</button><div class="sns-emoji-wrap"><button type="button" id="emoji-toggle" class="sns-attach" aria-label="이모지 선택" aria-expanded="false" aria-controls="emoji-picker" title="이모지 추가">${icon('smile')}</button><div id="emoji-picker" class="sns-emoji-picker" role="group" aria-label="이모지" hidden>${['😀','😊','😂','🥰','😍','🥹','😎','🤔','😢','😮','👏','👍','🙌','🙏','❤️','💙','✨','🔥','🎉','🌸','☀️','🌈','☕','🍀'].map(emoji => `<button type="button" data-emoji="${emoji}" aria-label="${emoji}">${emoji}</button>`).join('')}</div></div><span class="sns-compose-hint">하루 5장 · 장당 2MB</span></div><div class="sns-compose-actions"><span id="post-count" class="sns-char-counter" role="status" aria-label="500자 남음"><svg viewBox="0 0 24 24" aria-hidden="true"><circle class="sns-counter-track" cx="12" cy="12" r="9"/><circle id="post-progress" class="sns-counter-progress" cx="12" cy="12" r="9" pathLength="100"/></svg><span id="post-remaining"></span></span><button type="submit" class="sns-submit" disabled>게시하기</button></div></div></form></section>
+        <dialog id="compose-dialog" class="sns-compose-dialog" aria-label="새 글 작성"><div class="sns-dialog-header"><button type="button" id="close-compose" aria-label="작성창 닫기">×</button><span>새 게시글</span></div><div id="dialog-composer"></div></dialog>
         <div class="sns-section-heading"><span>새로운 이야기</span><span>NEWEST FIRST</span></div>
         <div id="feed-status" class="sns-status" role="status" aria-live="polite"></div><div id="feed-list"></div>
       </main>
@@ -53,7 +55,17 @@ export function showTimeline(root, user, { onProfile, onLogout, onExpired }) {
   const textarea = root.querySelector('#post-content')
   const imageInput = root.querySelector('#image-input')
   const imagePreview = root.querySelector('#image-preview')
+  const composeStatus = root.querySelector('#compose-status')
+  const composer = root.querySelector('.sns-composer')
+  const composerParent = composer.parentElement
+  const dialog = root.querySelector('#compose-dialog')
+  const submitButton = root.querySelector('#post-form button[type="submit"]')
+  const emojiToggle = root.querySelector('#emoji-toggle')
+  const emojiPicker = root.querySelector('#emoji-picker')
   let previewURL = null
+  let selectedImage = null
+  let submitting = false
+  let dialogTrigger = null
   let openPost = null
   let loading = false
 
@@ -108,37 +120,118 @@ export function showTimeline(root, user, { onProfile, onLogout, onExpired }) {
   root.querySelector('#feed-home').addEventListener('click', () => { openPost = null; loadFeed(); window.scrollTo({ top: 0, behavior: 'smooth' }) })
   root.querySelector('#mobile-home').addEventListener('click', () => root.querySelector('#feed-home').click())
   root.querySelector('#refresh-feed').addEventListener('click', loadFeed)
-  for (const id of ['focus-compose', 'mobile-write']) root.querySelector(`#${id}`).addEventListener('click', () => { textarea.focus(); textarea.scrollIntoView({ behavior: 'smooth', block: 'center' }) })
+  function openComposer(event) {
+    dialogTrigger = event.currentTarget
+    root.querySelector('#dialog-composer').append(composer)
+    dialog.showModal()
+    textarea.focus()
+  }
+  for (const id of ['focus-compose', 'mobile-write']) root.querySelector(`#${id}`).addEventListener('click', openComposer)
+  root.querySelector('#close-compose').addEventListener('click', () => { if (!submitting) dialog.close() })
+  dialog.addEventListener('cancel', event => { if (submitting) event.preventDefault() })
+  dialog.addEventListener('click', event => { if (event.target === dialog && !submitting) dialog.close() })
+  dialog.addEventListener('close', () => { closeEmojiPicker(); composerParent.insertBefore(composer, dialog); dialogTrigger?.focus() })
+  function updateComposer() {
+    textarea.style.height = 'auto'
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 240)}px`
+    const remaining = 500 - textarea.value.length
+    const counter = root.querySelector('#post-count')
+    counter.setAttribute('aria-label', `${remaining}자 남음`)
+    counter.classList.toggle('near-limit', remaining <= 50)
+    root.querySelector('#post-remaining').textContent = remaining <= 50 ? remaining : ''
+    root.querySelector('#post-progress').style.strokeDasharray = `${textarea.value.length / 5} 100`
+    submitButton.disabled = submitting || (!textarea.value.trim() && !selectedImage)
+  }
   function clearImage() {
     if (previewURL) URL.revokeObjectURL(previewURL)
     previewURL = null
+    selectedImage = null
     imageInput.value = ''
     imagePreview.hidden = true
     imagePreview.querySelector('img').removeAttribute('src')
+    updateComposer()
   }
+  function closeEmojiPicker() {
+    emojiPicker.hidden = true
+    emojiToggle.setAttribute('aria-expanded', 'false')
+  }
+  emojiToggle.addEventListener('click', () => {
+    emojiPicker.hidden = !emojiPicker.hidden
+    emojiToggle.setAttribute('aria-expanded', String(!emojiPicker.hidden))
+  })
+  emojiPicker.addEventListener('click', event => {
+    const button = event.target.closest('button[data-emoji]')
+    if (!button) return
+    const emoji = button.dataset.emoji
+    const start = textarea.selectionStart
+    const end = textarea.selectionEnd
+    if (textarea.value.length - (end - start) + emoji.length > 500) {
+      composeStatus.textContent = '글은 500자까지 입력할 수 있습니다.'
+      return
+    }
+    textarea.setRangeText(emoji, start, end, 'end')
+    closeEmojiPicker()
+    textarea.focus()
+    composeStatus.textContent = ''
+    updateComposer()
+  })
+  composer.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !emojiPicker.hidden) {
+      event.preventDefault()
+      event.stopPropagation()
+      closeEmojiPicker()
+      emojiToggle.focus()
+    }
+  })
+  composer.addEventListener('click', event => { if (!event.target.closest('.sns-emoji-wrap')) closeEmojiPicker() })
   root.querySelector('#attach-image').addEventListener('click', () => imageInput.click())
-  root.querySelector('#remove-image').addEventListener('click', clearImage)
-  imageInput.addEventListener('change', () => {
-    const file = imageInput.files[0]
+  root.querySelector('#remove-image').addEventListener('click', () => { clearImage(); composeStatus.textContent = '' })
+  function selectImage(file) {
     if (!file) { clearImage(); return }
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 2 * 1024 * 1024) {
       clearImage()
-      status.textContent = 'JPEG, PNG 또는 WebP 이미지를 2MB 이하로 선택해 주세요.'
+      composeStatus.textContent = 'JPEG, PNG 또는 WebP 이미지를 2MB 이하로 선택해 주세요.'
       return
     }
     if (previewURL) URL.revokeObjectURL(previewURL)
+    selectedImage = file
     previewURL = URL.createObjectURL(file)
     imagePreview.querySelector('img').src = previewURL
     imagePreview.hidden = false
-    status.textContent = ''
+    composeStatus.textContent = ''
+    updateComposer()
+  }
+  imageInput.addEventListener('change', () => selectImage(imageInput.files[0]))
+  textarea.addEventListener('paste', event => {
+    const file = Array.from(event.clipboardData?.items || []).find(item => item.kind === 'file' && item.type.startsWith('image/'))?.getAsFile()
+    if (file) { event.preventDefault(); selectImage(file) }
   })
-  textarea.addEventListener('input', () => { root.querySelector('#post-count').textContent = `${textarea.value.length} / 500` })
+  composer.addEventListener('dragover', event => { if (Array.from(event.dataTransfer?.types || []).includes('Files')) { event.preventDefault(); composer.classList.add('is-dragging') } })
+  composer.addEventListener('dragleave', event => { if (!composer.contains(event.relatedTarget)) composer.classList.remove('is-dragging') })
+  composer.addEventListener('drop', event => {
+    if (!event.dataTransfer?.files.length) return
+    event.preventDefault(); composer.classList.remove('is-dragging'); selectImage(event.dataTransfer.files[0])
+  })
+  textarea.addEventListener('input', () => { composeStatus.textContent = ''; updateComposer() })
+  textarea.addEventListener('keydown', event => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !submitButton.disabled) {
+      event.preventDefault()
+      root.querySelector('#post-form').requestSubmit()
+    }
+  })
   root.querySelector('#post-form').addEventListener('submit', async event => {
     event.preventDefault()
+    if (submitting) return
     const content = textarea.value.trim()
-    const file = imageInput.files[0]
-    if (!content && !file) { status.textContent = '내용이나 이미지를 입력해 주세요.'; return }
-    const button = event.currentTarget.querySelector('button'); button.disabled = true
+    const file = selectedImage
+    if (!content && !file) { composeStatus.textContent = '내용이나 이미지를 입력해 주세요.'; return }
+    submitting = true
+    textarea.disabled = true
+    root.querySelector('#attach-image').disabled = true
+    root.querySelector('#remove-image').disabled = true
+    root.querySelector('#close-compose').disabled = true
+    composeStatus.textContent = ''
+    updateComposer()
     try {
       if (file) {
         const body = new FormData()
@@ -148,9 +241,18 @@ export function showTimeline(root, user, { onProfile, onLogout, onExpired }) {
       } else {
         await request('/api/posts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) })
       }
-      textarea.value = ''; clearImage(); root.querySelector('#post-count').textContent = '0 / 500'; openPost = null; await loadFeed()
-    } catch (error) { if (status.isConnected) status.textContent = error.message }
-    finally { button.disabled = false }
+      textarea.value = ''; clearImage(); openPost = null
+      if (dialog.open) dialog.close()
+      await loadFeed()
+    } catch (error) { if (composeStatus.isConnected) composeStatus.textContent = error.message }
+    finally {
+      submitting = false
+      textarea.disabled = false
+      root.querySelector('#attach-image')?.removeAttribute('disabled')
+      root.querySelector('#remove-image')?.removeAttribute('disabled')
+      root.querySelector('#close-compose')?.removeAttribute('disabled')
+      if (textarea.isConnected) updateComposer()
+    }
   })
   list.addEventListener('click', async event => {
     const button = event.target.closest('button[data-action]')
@@ -178,5 +280,6 @@ export function showTimeline(root, user, { onProfile, onLogout, onExpired }) {
     } catch (error) { if (status.isConnected) status.textContent = error.message }
     finally { button.disabled = false }
   })
+  updateComposer()
   loadFeed()
 }
