@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: fastapi-kakao-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: uv sync --frozen --no-dev
+    startCommand: uv run --frozen --no-dev uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /docs
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: KAKAO_CLIENT_ID
+        sync: false
+      - key: KAKAO_CLIENT_SECRET
+        sync: false
+      - key: KAKAO_REDIRECT_URI
+        value: https://frontend-6vvg.vercel.app/api/auth/kakao/callback
+      - key: FRONTEND_URL
+        value: https://frontend-6vvg.vercel.app/
+      - key: COOKIE_SECURE
+        value: "true"
