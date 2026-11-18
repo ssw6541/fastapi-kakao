@@ -1,11 +1,12 @@
 import './style.css'
 import googleIcon from './assets/google.png'
 import kakaoIcon from './assets/kakao.png'
+import { showTimeline } from './feed.js'
 
 document.querySelector('#app').innerHTML = `
   <main class="layout">
     <section class="intro" aria-label="서비스 소개">
-      <div class="brand"><span class="brand-mark">✳</span> 새로운 시작</div>
+      <div class="brand"><span class="brand-mark">✳</span> 모아</div>
       <div class="intro-content">
         <span class="eyebrow">WELCOME ABOARD</span>
         <h1>반가워요.<br>우리 함께 시작해요<span>.</span></h1>
@@ -16,7 +17,7 @@ document.querySelector('#app').innerHTML = `
     </section>
     <section class="form-section">
       <div class="form-wrap">
-        <div class="mobile-brand"><span class="brand-mark">✳</span> 새로운 시작</div>
+        <div class="mobile-brand"><span class="brand-mark">✳</span> 모아</div>
         <div id="content"></div>
       </div>
     </section>
@@ -25,6 +26,7 @@ document.querySelector('#app').innerHTML = `
 const content = document.querySelector('#content')
 
 function showForm(mode, notice = '') {
+  document.body.classList.remove('in-app')
   const isSignup = mode === 'signup'
   content.innerHTML = `
     <div class="form-heading"><span class="step">${isSignup ? 'GET STARTED' : 'WELCOME BACK'}</span>
@@ -77,20 +79,22 @@ function showForm(mode, notice = '') {
 }
 
 function showAccount(user) {
-  content.innerHTML = `<div class="form-heading"><span class="step">WELCOME BACK</span><h2 id="welcome"></h2><p>로그인되어 있습니다.</p></div><p id="account-email" class="account-email"></p><button type="button" id="profile" class="full-button">내 정보 확인</button><p id="account-message" class="message" role="status" aria-live="polite"></p><button type="button" id="logout" class="full-button">로그아웃</button>`
-  document.querySelector('#welcome').textContent = `${user.name}님, 반가워요.`
-  document.querySelector('#account-email').textContent = user.email || '소셜 계정으로 로그인'
-  document.querySelector('#profile').addEventListener('click', showProfile)
-  document.querySelector('#logout').addEventListener('click', async (event) => {
-    event.currentTarget.disabled = true
-    try {
-      const response = await fetch('/api/logout', { method: 'POST' })
-      if (!response.ok) throw new Error('로그아웃에 실패했습니다.')
-      showForm('login', '로그아웃되었습니다.')
-    } catch {
-      document.querySelector('#account-message').textContent = '로그아웃할 수 없습니다. 다시 시도해 주세요.'
-      event.currentTarget.disabled = false
-    }
+  showTimeline(content, user, {
+    onProfile: showProfile,
+    onExpired: () => showForm('login', '로그인이 만료되었습니다. 다시 로그인해 주세요.'),
+    onLogout: async (event) => {
+      const button = event.currentTarget
+      button.disabled = true
+      try {
+        const response = await fetch('/api/logout', { method: 'POST' })
+        if (!response.ok) throw new Error('로그아웃에 실패했습니다.')
+        showForm('login', '로그아웃되었습니다.')
+      } catch {
+        const status = document.querySelector('#feed-status')
+        if (status) status.textContent = '로그아웃할 수 없습니다. 다시 시도해 주세요.'
+        button.disabled = false
+      }
+    },
   })
 }
 
@@ -106,6 +110,7 @@ async function showProfile() {
     }
     if (!response.ok) throw new Error('정보를 불러오지 못했습니다.')
     let user = await response.json()
+    document.body.classList.remove('in-app')
     content.innerHTML = `
       <div class="form-heading"><span class="step">MY ACCOUNT</span><h2>내 정보</h2><p>가입하신 계정 정보를 확인하세요.</p></div>
       <form id="profile-form">
@@ -173,7 +178,7 @@ async function showProfile() {
       }
     })
   } catch {
-    document.querySelector('#account-message').textContent = '정보를 불러오지 못했습니다. 다시 시도해 주세요.'
+    document.querySelector('#feed-status').textContent = '정보를 불러오지 못했습니다. 다시 시도해 주세요.'
     button.disabled = false
   }
 }

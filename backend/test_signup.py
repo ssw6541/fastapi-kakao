@@ -136,6 +136,32 @@ def test_update_own_profile(tmp_path, monkeypatch):
         assert other.get("/api/me").json()["name"] == "Second"
 
 
+def test_community_posts_replies_likes_and_permissions(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.db")
+    with TestClient(main.app) as alice, TestClient(main.app) as bob:
+        assert alice.get("/api/posts").status_code == 401
+        for client, name in ((alice, "Alice"), (bob, "Bob")):
+            email = name.lower() + "@example.com"
+            assert client.post("/api/signup", json={"name": name, "email": email, "password": "password123"}).status_code == 201
+            assert client.post("/api/login", json={"email": email, "password": "password123"}).status_code == 200
+        assert alice.post("/api/posts", json={"content": "   "}).status_code == 422
+        post = alice.post("/api/posts", json={"content": "Hello community"})
+        assert post.status_code == 201
+        post_id = post.json()["id"]
+        reply = bob.post("/api/posts", json={"content": "Hello back", "parent_id": post_id})
+        assert reply.status_code == 201
+        assert bob.post(f"/api/posts/{post_id}/like").json()["liked"] is True
+        feed = bob.get("/api/posts").json()
+        assert len(feed) == 1 and feed[0]["reply_count"] == 1
+        assert feed[0]["like_count"] == 1 and feed[0]["liked"] is True
+        assert alice.get(f"/api/posts/{post_id}/replies").json()[0]["content"] == "Hello back"
+        assert bob.delete(f"/api/posts/{post_id}").status_code == 403
+        assert bob.post(f"/api/posts/{post_id}/like").json()["liked"] is False
+        assert alice.delete(f"/api/posts/{post_id}").status_code == 204
+        assert alice.get("/api/posts").json() == []
+        assert bob.get(f"/api/posts/{post_id}/replies").status_code == 404
+
+
 def test_delete_account_revokes_all_sessions(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.db")
     with TestClient(main.app) as client, TestClient(main.app) as other:
