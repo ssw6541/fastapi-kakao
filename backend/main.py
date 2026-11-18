@@ -178,7 +178,7 @@ def create_post(post: PostRequest, user_id: int = Depends(current_user_id)):
     return {"id": row[0]}
 
 
-@app.post("/api/posts/with-image", status_code=201)
+@app.post("/api/posts/with-image", status_code=201, responses={429: {"description": "Daily image upload limit reached"}})
 async def create_post_with_image(image: UploadFile = File(...), content: str = Form(default="", max_length=500), user_id: int = Depends(current_user_id)):
     data = await image.read(2 * 1024 * 1024 + 1)
     if len(data) > 2 * 1024 * 1024:
