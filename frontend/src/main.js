@@ -1,7 +1,9 @@
 import './style.css'
+import './session.css'
 import googleIcon from './assets/google.png'
 import kakaoIcon from './assets/kakao.png'
 import { showTimeline } from './feed.js'
+import { restoreSession } from './session.js'
 
 document.querySelector('#app').innerHTML = `
   <main class="layout">
@@ -183,5 +185,4 @@ async function showProfile() {
   }
 }
 
-showForm('login')
-fetch('/api/me').then(response => response.ok ? response.json() : null).then(user => { if (user) showAccount(user) }).catch(() => {})
+restoreSession({ onAuthenticated: showAccount, onUnauthenticated: () => showForm('login') })
