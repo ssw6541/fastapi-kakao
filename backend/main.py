@@ -1,7 +1,7 @@
 ﻿from contextlib import asynccontextmanager
 from pathlib import Path
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import os
@@ -21,6 +21,11 @@ from pwdlib import PasswordHash
 DB_PATH = Path(__file__).parent / "users.db"
 load_dotenv(Path(__file__).parent / ".env")
 password_hasher = PasswordHash.recommended()
+KOREA_TIME = timezone(timedelta(hours=9))
+
+
+def image_upload_day():
+    return datetime.now(KOREA_TIME).date().isoformat()
 
 
 def uses_postgres():
@@ -94,6 +99,14 @@ def init_database():
         db.execute("CREATE INDEX IF NOT EXISTS posts_parent_id_idx ON posts (parent_id, id)")
         db.execute("CREATE INDEX IF NOT EXISTS posts_author_id_idx ON posts (author_id)")
         db.execute("CREATE INDEX IF NOT EXISTS post_likes_user_id_idx ON post_likes (user_id)")
+        db.execute("CREATE TABLE IF NOT EXISTS image_uploads (user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, upload_date TEXT NOT NULL, upload_count INTEGER NOT NULL, PRIMARY KEY (user_id, upload_date))")
+        day = image_upload_day()
+        start = datetime.fromisoformat(day).replace(tzinfo=KOREA_TIME)
+        start_utc = start.astimezone(timezone.utc).isoformat()
+        end_utc = (start + timedelta(days=1)).astimezone(timezone.utc).isoformat()
+        existing = execute(db, "SELECT author_id, COUNT(*) FROM posts WHERE image_data IS NOT NULL AND created_at >= ? AND created_at < ? GROUP BY author_id", (start_utc, end_utc)).fetchall()
+        for user_id, count in existing:
+            execute(db, "INSERT INTO image_uploads (user_id, upload_date, upload_count) VALUES (?, ?, ?) ON CONFLICT (user_id, upload_date) DO NOTHING", (user_id, day, count))
 
 
 @asynccontextmanager
@@ -179,6 +192,9 @@ async def create_post_with_image(image: UploadFile = File(...), content: str = F
     except (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError):
         raise HTTPException(status_code=422, detail="JPEG, PNG 또는 WebP 이미지를 선택해 주세요.") from None
     with connect() as db:
+        count = execute(db, "INSERT INTO image_uploads (user_id, upload_date, upload_count) VALUES (?, ?, 1) ON CONFLICT (user_id, upload_date) DO UPDATE SET upload_count = image_uploads.upload_count + 1 WHERE image_uploads.upload_count < 5 RETURNING upload_count", (user_id, image_upload_day())).fetchone()
+        if count is None:
+            raise HTTPException(status_code=429, detail="이미지는 하루에 5장까지 올릴 수 있습니다. 한국 시간 자정 이후 다시 시도해 주세요.")
         row = execute(db, "INSERT INTO posts (author_id, content, created_at, image_data, image_type) VALUES (?, ?, ?, ?, ?) RETURNING id", (user_id, content.strip(), datetime.now(timezone.utc).isoformat(), data, mime)).fetchone()
     return {"id": row[0]}
 

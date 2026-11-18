@@ -189,6 +189,28 @@ def test_post_image_attachment(tmp_path, monkeypatch):
         assert client.post('/api/posts/with-image', files={'image': ('a.png', payload, 'image/png')}).status_code == 201
 
 
+def test_image_upload_daily_limit_and_rollover(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.db")
+    image = io.BytesIO()
+    Image.new("RGB", (2, 2), "red").save(image, format="PNG")
+    payload = image.getvalue()
+    with TestClient(main.app) as alice, TestClient(main.app) as bob:
+        for client, name in ((alice, 'alice'), (bob, 'bob')):
+            email = name + '@example.com'
+            assert client.post('/api/signup', json={'name':name,'email':email,'password':'password123'}).status_code == 201
+            assert client.post('/api/login', json={'email':email,'password':'password123'}).status_code == 200
+        for _ in range(5):
+            result = alice.post('/api/posts/with-image', files={'image': ('a.png', payload, 'image/png')})
+            assert result.status_code == 201
+        assert alice.delete('/api/posts/' + str(result.json()['id'])).status_code == 204
+        limited = alice.post('/api/posts/with-image', files={'image': ('a.png', payload, 'image/png')})
+        assert limited.status_code == 429
+        assert alice.post('/api/posts', json={'content':'text still works'}).status_code == 201
+        assert bob.post('/api/posts/with-image', files={'image': ('a.png', payload, 'image/png')}).status_code == 201
+        monkeypatch.setattr(main, 'image_upload_day', lambda: '2099-01-01')
+        assert alice.post('/api/posts/with-image', files={'image': ('a.png', payload, 'image/png')}).status_code == 201
+
+
 def test_existing_posts_migrate_without_data_loss(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.db")
     with sqlite3.connect(main.DB_PATH) as db:
@@ -200,6 +222,21 @@ def test_existing_posts_migrate_without_data_loss(tmp_path, monkeypatch):
     main.init_database()
     with sqlite3.connect(main.DB_PATH) as db:
         assert db.execute("SELECT content, image_data, image_type FROM posts WHERE id=1").fetchone() == ('Existing post', None, None)
+
+
+def test_existing_image_uploads_count_after_migration(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.db")
+    main.init_database()
+    with sqlite3.connect(main.DB_PATH) as db:
+        db.execute("INSERT INTO users VALUES (1, 'Author', 'a@example.com', 'hash')")
+        db.execute("INSERT INTO posts (author_id, content, created_at, image_data, image_type) VALUES (1, '', ?, ?, 'image/png')", (main.datetime.now(main.timezone.utc).isoformat(), b'image'))
+    main.init_database()
+    with sqlite3.connect(main.DB_PATH) as db:
+        assert db.execute("SELECT upload_count FROM image_uploads WHERE user_id=1").fetchone()[0] == 1
+        db.execute("DELETE FROM posts")
+    main.init_database()
+    with sqlite3.connect(main.DB_PATH) as db:
+        assert db.execute("SELECT upload_count FROM image_uploads WHERE user_id=1").fetchone()[0] == 1
 
 
 def test_delete_account_revokes_all_sessions(tmp_path, monkeypatch):
